@@ -50,6 +50,10 @@ class Net:
     get_route:
         returns deque of vertex indices that form route from one vertex to
         another
+    move_cars:
+        attempts to move `Car` objects in vertex's `vontrack`
+    spawn_car:
+        spawns car or multiple cars at target vertex
     """
 
     def __init__(self, size, names=None, edges=None, **kwargs):
@@ -88,8 +92,6 @@ class Net:
             objects for each vertex. Cars are assigned according to vertex
             index. Default: collections.deque([])
         """
-
-        # TODO: random edges in graph
 
         self.g = gt.Graph(directed=False)
         self.g.add_vertex(size)
@@ -212,9 +214,11 @@ class Net:
 
     def move_cars(self):
         """
-        Attempts to move cars to the next vertex in their route
+        Evaluates all vertices and attempts to move `Car` object in `vontrack`
+        deque along their paths.
 
-        Iterates over all vertices in `g`
+        Stuck cars raise RuntimeError and are despawned after. If car reaches
+        destination, print message and despawn car.
         """
 
         for v in self.g.vertices():
@@ -256,7 +260,7 @@ class Net:
             for car in self.vontrack[v]:
                 car.can_move = True
 
-    def spawn_car(self, target, amount, **kwargs):
+    def spawn_car(self, target, **kwargs):
         """
         Creates amount of `Car` objects in vertex
 
@@ -265,11 +269,11 @@ class Net:
         target: str or int
             vertex name or vertex index of target where objects should be
             spawned
-        amount: int
-            how many objects to spawn
 
         Kwargs
         -----
+        amount: int
+            how many objects to spawn
         route: collections.deque([int])
             route deque. Using `get_route` method is recommended. `route` and
             `dst` are self-exclusive, if both are provided, `route` takes
@@ -303,6 +307,10 @@ class Net:
         else:
             dst = np.random.choice(np.delete(self.g.get_vertices(), target))
             route = self.get_route(target, dst)
+        if 'amount' in kwargs:
+            amount = kwargs['amount']
+        else:
+            amount = 1
         for _ in range(amount):
             car = Car(route, **kwargs)
             self.vontrack[target].append(car)
@@ -374,7 +382,6 @@ class Car:
             self.inside = kwargs['amount']
         else:
             self.inside = 0
-
         # try to convert list elements into vertex indices
         try:
             self.route = deque([int(item) for item in route])
@@ -401,31 +408,6 @@ class Car:
                 )
         else:
             self.cur = self.route.popleft()
-
-    def step():
-        """
-        Step evaluation
-
-        Car attempts to follow a path to the next vertex in route.
-
-        Arguments
-        ------
-        none
-
-        Returns
-        ------
-        status: int
-            execution status.
-            0 - car arrived to new location
-            1 - car at the end of the route
-            2 - unable to traverse further
-        """
-
-        try:
-            nextvert = self.route.popleft()
-        except IndexError:
-            # car is at the endpoint
-            return 1
 
 
 class Passenger:
