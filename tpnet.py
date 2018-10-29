@@ -44,6 +44,8 @@ class Net:
         deque of `Passenger` objects inside of each `g` vertex
     vontrack: graph_tool.PropertyMap (type: object)
         deque of `Car` objects inside of each `g` vertex
+    venroute: graph_tool.PropertyMap (type: object)
+        deque of `Car` objects in transition between vertices (on edges of `g`)
 
     Methods
     ------
@@ -91,6 +93,11 @@ class Net:
             starting cars. Must be an iterable that contains deques with `Car`
             objects for each vertex. Cars are assigned according to vertex
             index. Default: collections.deque([])
+        enroute: iter(s, t, iter(`Car`))
+            Starting cars in transition between vertices.  Must be an iterable
+            that contains starting edge vertex, ending edge vertex and a deque
+            with `Car` objects. Default: collections.deque([])
+
         """
 
         self.g = gt.Graph(directed=False)
@@ -160,6 +167,14 @@ class Net:
             for v in self.g.vertices():
                 self.vontrack[v] = deque([])
 
+        self.venroute = self.g.new_edge_property('object')
+        if 'enroute' in kwargs:
+            for vin, vout, ed in kwargs['enroute']:
+                self.venroute[self.g.edge(vin, vout)] = ed
+        else:
+            for e in self.g.get_edges():
+                self.venroute[e] = deque([])
+
     def get_route(self, src, dst, **kwargs):
         """
         Returns list with route from `source` to `destination`
@@ -212,22 +227,43 @@ class Net:
                 raise RuntimeError('cannot find route')
         return route
 
-    def move_cars(self):
+    def move_cars(self, unlock=True):
         """
         Evaluates all vertices and attempts to move `Car` object in `vontrack`
         deque along their paths.
 
+        Moves `Car` objects in two steps. First, checks the edges for cars in
+        transition. Any cars found will be transferred to according vertices
+        and locked.  At second step checks the vertices for cars that can move
+        along route.  If found, transfers them to according edge and locks
+        them. After finishing, if `unlock` is True, unlocks all cars.
+
         Stuck cars raise RuntimeError and are despawned after. If car reaches
         destination, print message and despawn car.
+
+        Arguments
+        ------
+        unlock: bool
+            if True, unlocks all cars after moving
         """
 
+        for e in self.g.edges():
+            for _ in range(len(self.venroute[e])):
+                car = self.venroute[e].popleft()
+                if car.can_move:
+                    nextvert = car.route.popleft()
+                    if car.namelup:
+                        nextvert = self.namelup[nextvert]
+                    self.vontrack[nextvert].append(car)
+                    car.cur = nextvert
+                    car.can_move = False
         for v in self.g.vertices():
             for _ in range(len(self.vontrack[v])):
                 car = self.vontrack[v].popleft()
                 if car.can_move:
                     # popleft next vertex from route
                     try:
-                        nextvert = car.route.popleft()
+                        nextvert = car.route[0]
                     except IndexError:
                         print(
                             'Car #{0} reached destination at {1}: {2}'.format(
@@ -242,8 +278,11 @@ class Net:
                         # use get_in_neighbors or get_out_neighbors
                         neighbors = self.g.get_in_neighbors(self.g.vertex(v))
                         if nextvert in neighbors:
-                            self.vontrack[nextvert].append(car)
-                            car.cur = nextvert
+                            e = self.g.edge(v, nextvert)
+                            self.venroute[e].append(car)
+                            car.cur = '{0}-{1}'.format(
+                                self.g.vertex_index[v], nextvert
+                            )
                             car.can_move = False
                         else:
                             raise RuntimeWarning(
@@ -258,6 +297,9 @@ class Net:
         # unlock all cars for next step
         for v in self.g.vertices():
             for car in self.vontrack[v]:
+                car.can_move = True
+        for e in self.g.edges():
+            for car in self.venroute[e]:
                 car.can_move = True
 
     def spawn_car(self, target, **kwargs):
