@@ -24,6 +24,7 @@ import numpy as np
 import graph_tool as gt
 
 
+# TODO: remove vload, it duplicates vinside
 class Net:
     """
     Transport network class
@@ -31,31 +32,38 @@ class Net:
     Variables
     ------
     g: graph_tool.Graph
-        `Graph` object that contains all information about network
+        `Graph` object that contains all information about network.
     vname: graph_tool.PropertyMap (type: string)
-        vertex names. Might be absent if no names were provided to constructor
+        vertex names. Might be absent if no names were provided to constructor.
     namelup: dict
-        dictionary that provides index lookup by name
+        dictionary that provides index lookup by name.
     vload: graph_tool.PropertyMap (type: object)
         current load of each vertex.
     vloadargs: graph_tool.PropertyMap (type: vector<float>)
-        attributes of function for periodic load change
+        attributes of function for periodic load change.
     vinside: graph_tool.PropertyMap (type: object)
-        deque of `Passenger` objects inside of each `g` vertex
+        deque of `Passenger` objects inside of each `g` vertex.
     vontrack: graph_tool.PropertyMap (type: object)
-        deque of `Car` objects inside of each `g` vertex
+        deque of `Car` objects inside of each `g` vertex.
     venroute: graph_tool.PropertyMap (type: object)
-        deque of `Car` objects in transition between vertices (on edges of `g`)
+        deque of `Car` objects in transition between vertices (on edges of
+        `g`).
 
     Methods
     ------
     get_route:
         returns deque of vertex indices that form route from one vertex to
-        another
+        another.
     move_cars:
-        attempts to move `Car` objects in vertex's `vontrack`
+        attempts to move `Car` objects in vertex's `vontrack`.
     spawn_car:
-        spawns car or multiple cars at target vertex
+        spawns `Car` objects at target vertex.
+    spawn_passenger:
+        spawns `Passenger` objects at target vertex.
+    ptransfer:
+        moves `Passenger` objects from and into cars.
+    getstat:
+        returns array with statistics
     """
 
     def __init__(self, size, names=None, edges=None, **kwargs):
@@ -65,38 +73,38 @@ class Net:
         Args
         ------
         size: int
-            number of vertices in graph
+            number of vertices in graph.
         names: iter(str)
-            list of vertex names, optional
+            list of vertex names, optional.
         edges: iter(tuple(str, str))
-            list of edges between vertices
+            list of edges between vertices.
 
         Kwargs
         ------
         max_random_edges: int
-            amount of random edges to generate. Default: `size`*2
+            amount of random edges to generate. Default: `size`*2.
         load: iter(`Passenger`)
             iterator of starting load for vertices. Must contain Passenger
-            class objects. Default: []
+            class objects. Default: [].
         loadargs: iter(tuple(float, float))
             iterator of (frequency, offset) of periodic load function, must be
             size of `size`. This influences on how many Passenger-class objects
-            to spawn on next iteration. Default: None
+            to spawn on next iteration. Default: None.
         weight: iter(float)
             weight property of `g` edges. Must be size of `edges` or `size*2`
-            if `edges` is None. Default: 1
-        inside: iter(iter(`Passenger`))
+            if `edges` is None. Default: 1.
+        inside: iter(collections.deque(`Passenger`))
             starting passengers. Must be an iterable that contains deques with
             `Passenger` objects for each vertex. Passengers are assigned
-            according to vertex index. Default: collections.deque([])
+            according to vertex index. Default: collections.deque([]).
         ontrack: iter(iter(`Car`))
             starting cars. Must be an iterable that contains deques with `Car`
             objects for each vertex. Cars are assigned according to vertex
-            index. Default: collections.deque([])
+            index. Default: collections.deque([]).
         enroute: iter(s, t, iter(`Car`))
             Starting cars in transition between vertices.  Must be an iterable
             that contains starting edge vertex, ending edge vertex and a deque
-            with `Car` objects. Default: collections.deque([])
+            with `Car` objects. Default: collections.deque([]).
 
         """
 
@@ -184,12 +192,16 @@ class Net:
         src: int or str
             starting point of route, can be vertex name or vertex index.
         dst: int or str
-            final point of route, can be vertex name or vertex index
+            final point of route, can be vertex name or vertex index.
+
+        Kwargs
+        ------
+        none yet.
 
         Returns
         ------
         route: collections.deque
-            deque of vertex indices of the route from `src` to `dst`
+            deque of vertex indices of the route from `src` to `dst`.
         """
 
         # separate checks to allow source and destination to be
@@ -244,7 +256,11 @@ class Net:
         Arguments
         ------
         unlock: bool
-            if True, unlocks all cars after moving
+            if True, unlocks all cars after moving. Default: True.
+
+        Returns
+        ------
+        nuffin.
         """
 
         for e in self.g.edges():
@@ -257,7 +273,9 @@ class Net:
                     self.vontrack[nextvert].append(car)
                     car.cur = nextvert
                     car.can_move = False
-        for v in self.g.vertices():
+                    # TODO: ask passengers inside to kindly remove first
+                    # element in route deque
+        for v in self.g.get_vertices():
             for _ in range(len(self.vontrack[v])):
                 car = self.vontrack[v].popleft()
                 if car.can_move:
@@ -267,7 +285,7 @@ class Net:
                     except IndexError:
                         print(
                             'Car #{0} reached destination at {1}: {2}'.format(
-                                car.id, self.g.vertex_index[v], self.vname[v]
+                                car.id, v, self.vname[v]
                             )
                         )
                         nextvert = None
@@ -280,16 +298,12 @@ class Net:
                         if nextvert in neighbors:
                             e = self.g.edge(v, nextvert)
                             self.venroute[e].append(car)
-                            car.cur = '{0}-{1}'.format(
-                                self.g.vertex_index[v], nextvert
-                            )
+                            car.cur = '{0}-{1}'.format(v, nextvert)
                             car.can_move = False
                         else:
                             raise RuntimeWarning(
                                 'car#{0} is stuck at vertex {1}: {2}'.format(
-                                    car.id,
-                                    self.g.vertex_index[v],
-                                    self.vname[v]
+                                    car.id, v, self.vname[v]
                                 )
                             )
                 else:
@@ -304,29 +318,34 @@ class Net:
 
     def spawn_car(self, target, **kwargs):
         """
-        Creates amount of `Car` objects in vertex
+        Creates `Car` objects at `target` vertex and places them in `vontrack`.
 
         Arguments
         ------
         target: str or int
             vertex name or vertex index of target where objects should be
-            spawned
+            spawned.
 
         Kwargs
         -----
         amount: int
-            how many objects to spawn
+            how many objects to spawn.
         route: collections.deque([int])
             route deque. Using `get_route` method is recommended. `route` and
             `dst` are self-exclusive, if both are provided, `route` takes
-            priority. If neither `route` nor `dst` are provided, the route
-            is randomly generated. Route must include current station.
+            priority. If neither `route` nor `dst` are provided, the route is
+            randomly generated for each object. Route must include current
+            station.
         dst: str or int
             car travel destination. Can be vertex name or vertex index. `route`
             and `dst` are self-exclusive, if both are provided, `route` takes
             priority. If neither `route` nor `dst` are provided, the route
-            is ramdomly generated.
-        other kwargs are passed to `Car` object
+            is ramdomly generated for each object.
+        other kwargs are passed to a `Car` object.
+
+        Returns
+        ------
+        nuffin.
         """
 
         try:
@@ -342,20 +361,184 @@ class Net:
                 'target expected to be iter(str) or iter(int). '
                 'got {}'.format(type(route))
             )
-        if 'route' in kwargs:
-            route = kwargs.pop('route')
-        elif 'dst' in kwargs:
-            route = self.get_route(target, kwargs.pop('dst'))
-        else:
-            dst = np.random.choice(np.delete(self.g.get_vertices(), target))
-            route = self.get_route(target, dst)
         if 'amount' in kwargs:
             amount = kwargs['amount']
         else:
             amount = 1
         for _ in range(amount):
+            if 'route' in kwargs:
+                route = kwargs.pop('route')
+            elif 'dst' in kwargs:
+                route = self.get_route(target, kwargs.pop('dst'))
+            else:
+                dst = np.random.choice(
+                    np.delete(self.g.get_vertices(), target)
+                )
+                route = self.get_route(target, dst)
             car = Car(route, **kwargs)
             self.vontrack[target].append(car)
+
+    def spawn_passenger(self, target, **kwargs):
+        """
+        Creates `Passenger` objects at `target` vertex and places them in
+        `vinside`.
+
+        Arguments
+        ------
+        target: str or int
+            vertex name or vertex index of target where objects should be
+            spawned.
+
+        Kwargs
+        -----
+        amount: int
+            how many objects to spawn.
+        route: collections.deque([int])
+            route deque. Using `get_route` method is recommended. `route` and
+            `dst` are self-exclusive, if both are provided, `route` takes
+            priority. If neither `route` nor `dst` are provided, the route is
+            randomly generated for each object. Route must include current
+            station.
+        dst: str or int
+            car travel destination. Can be vertex name or vertex index. `route`
+            and `dst` are self-exclusive, if both are provided, `route` takes
+            priority. If neither `route` nor `dst` are provided, the route
+            is ramdomly generated for each object.
+        other kwargs are passed to a `Passenger` object.
+
+        Returns
+        ------
+        nuffin.
+        """
+
+        try:
+            target = int(target)
+        except ValueError:
+            # assume it is vertex name
+            try:
+                target = self.namelup[target]
+            except KeyError:
+                raise KeyError('nonexistant vertex name {}'.format(target))
+        except TypeError:
+            raise TypeError(
+                'target expected to be str or int. '
+                'got {}'.format(type(route))
+            )
+        if 'amount' in kwargs:
+            amount = kwargs['amount']
+        else:
+            amount = 1
+        for _ in range(amount):
+            if 'route' in kwargs:
+                route = kwargs.pop('route')
+            elif 'dst' in kwargs:
+                route = self.get_route(target, kwargs.pop('dst'))
+            else:
+                dst = np.random.choice(
+                    np.delete(self.g.get_vertices(), target)
+                )
+                route = self.get_route(target, dst)
+            pgr = Passenger(route, **kwargs)
+            self.vinside[target].append(pgr)
+
+    def ptransfer(self, targets=None):
+        """
+        Transfers `Passenger` objects from and into `Car` objects.
+
+        First, gets all `Passenger` objects from `Car` objects (in `vontrack`
+        at vertex) that have this station as destination. Then checks
+        `Passenger` objects (in `vinside` at vertex) if they should get into
+        `Car` object to move along their route.
+
+        Arguments
+        ------
+        target: iter(str) or iter(int)
+            Can be provided to check only specified sequence of vertices. List
+            elements can be vertex indices or vertex names.
+
+        Kwargs
+        ------
+        none yet.
+
+        Returns
+        ------
+        ptransfer: iter(`Passenger`)
+            iterator of `Passenger` objects.
+        """
+        if targets:
+            try:
+                targets = [int(item) for item in targets]
+            except ValueError:
+                # assume it is vertex name
+                try:
+                    targets = [self.namelup[item] for item in targets]
+                except KeyError:
+                    raise KeyError(
+                        'nonexistant vertex name {}'.format(targets)
+                    )
+            except TypeError:
+                raise TypeError(
+                    'targets expected to be iter(str) or iter(int). '
+                    'got {}'.format(type(route))
+                )
+        else:
+            targets = self.g.get_vertices()
+        for v in targets:
+            ptransfer = np.ndarray([], dtype='object')
+            # get all passengers that need transfer or at final destination and
+            # place them in buffer
+            for car in self.vontrack[v]:
+                ptransfer = np.append(
+                    ptransfer,
+                    car.peject(v)
+                )
+            for _ in range(len(self.vinside[v])):
+                p = self.vinside[v].popleft()
+                # route item will be popped at arrival to the next vertex
+                nextvert = p.route[0]
+                if p.namelup:
+                    nextvert = self.namelup[nextvert]
+                found = False
+                for car in self.vontrack[v]:
+                    # check if car full
+                    if not len(car.inside) >= car.size:
+                        # TODO: passengers should take cars that have their
+                        # next route vertex as next stop instead of hoping that
+                        # they will eventually arrive
+                        if nextvert in car.route:
+                            car.inside.append(p)
+                            found = True
+                            break
+                if not found:
+                    # place it back and hope for the best
+                    self.vinside[v].append(p)
+            # assign all passengers from buffer to vertex
+            for p in ptransfer:
+                p.route.popleft()
+                self.vinside[v].append(p)
+
+    def getstat(self):
+        """
+        Returns array with statistics
+
+        Order of columns: vname, len(vinside), len(vontrack)
+
+        Arguments
+        ------
+        none yet
+
+        Returns
+        ------
+        stat: numpy.ndarray
+            array with statistics
+        """
+
+        stat = np.ndarray([])
+        for v in self.g.get_vertices():
+            stat = np.append(stat, [
+                self.vname[v], len(self.vinside[v]), len(self.vontrack[v])
+                ])
+        return stat
 
 
 class Car:
@@ -389,6 +572,8 @@ class Car:
 
     Methods
     ------
+    get_ptransfer:
+        returns `Passenger` objects for transfer
     """
 
     total = [0]
@@ -400,19 +585,21 @@ class Car:
         Args
         ------
         route: collections.deque(str) or collections.deque(int)
-            route to follow, must contain either vertex names or vertex indices
+            route to follow, must contain either vertex names or vertex
+            indices.
         size: int
-            car passenger capacity. Default: 20
+            car passenger capacity. Default: 20.
 
         Kwargs
         ------
-        inside: int
-            starting amount of passengers. Default: 0
+        inside: collections.deque(`Passenger`)
+            starting passengers inside of car. Must be deque, containing
+            `Passenger` objects. Default: deque([]).
         cur: str or int
             starting position of car. Avoid using this argument unless you know
             what you are doing, because this may lead to stuck cars.  `cur`
             must be same type as `route` to avoid improper `namelup`
-            assignment. Default: `route[0]`
+            assignment. Default: `route[0]`.
         """
 
         self.id = self.total[0]
@@ -423,7 +610,7 @@ class Car:
         if 'amount' in kwargs:
             self.inside = kwargs['amount']
         else:
-            self.inside = 0
+            self.inside = deque([])
         # try to convert list elements into vertex indices
         try:
             self.route = deque([int(item) for item in route])
@@ -451,6 +638,38 @@ class Car:
         else:
             self.cur = self.route.popleft()
 
+    def peject(self, current):
+        """
+        returns array of `Passenger` objects (taken from `inside` attribute)
+        that need to transfer to different car or reached final destination.
+
+        Arguments
+        ------
+        current: str or int
+            current vertex. Is compared to `cur` attribute so passengers don't
+            get ejected at edges or wrong vertices. If `namelup` is True,
+            `current` must be a vertex name. Otherwise it must be a vertex
+            index.
+
+        Returns
+        ------
+        ptransfer: numpy.ndarray(`Passenger`)
+            an array of `Passenger` objects taken from `inside` attribute.
+        """
+
+        if self.cur != current:
+            raise RuntimeError(
+                'Car #{0} is at unexpected location.'
+                'Expected {1}, got {2}.'.format(self.id, self.cur, current)
+            )
+        ejecting = np.ndarray([], dtype='object')
+        nextvert = self.route[0]
+        for p in self.inside:
+            # check if next destination in route and we will eventually arrive
+            # TODO: fix this so passengers can be more picky about cars
+            if not p.route[0] in self.route:
+                ejecting = np.append(ejecting, p)
+
 
 class Passenger:
     """
@@ -471,17 +690,18 @@ class Passenger:
         unique identification number of the passenger.
     total: [long]
         `id` that was assigned to the last created passenger, represents total
-        amount of passengers created
+        amount of passengers created.
 
     Methods
     ------
+        none yet.
     """
 
     total = [0]
 
     def __init__(self, route, **kwargs):
         """
-        Initialize Passenger
+        Initialize Passenger.
 
         Args
         ------
@@ -495,7 +715,7 @@ class Passenger:
             current passenger position. Avoid using this argument unless you
             know what you are doing, because this may lead to stuck passengers.
             `cur` must be same type as `route` to avoid improper `namelup`
-            assignment. Default: `route[0]`
+            assignment. Default: `route[0]`.
         """
 
         # assign id and increment total
