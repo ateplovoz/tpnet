@@ -48,6 +48,10 @@ class Net:
     venroute: graph_tool.PropertyMap (type: object)
         deque of `Car` objects in transition between vertices (on edges of
         `g`).
+    allcars: dict
+        dictionary that contains all spawned `Car` objects
+    allpassengers: dict
+        dictionary that contains all spawned `Passenger` objects
 
     Methods
     ------
@@ -110,6 +114,8 @@ class Net:
 
         self.g = gt.Graph(directed=False)
         self.g.add_vertex(size)
+        self.allcars = {}
+        self.allpassengers = {}
 
         if names:
             self.vname = self.g.new_vertex_property('string')
@@ -121,7 +127,7 @@ class Net:
             }
         if edges:
             edges_indexed = [
-                (self.vnamelup[name1], self.vnamelup[name2])
+                (self.namelup[name1], self.namelup[name2])
                 for name1, name2 in edges
             ]
         else:
@@ -180,7 +186,7 @@ class Net:
             for vin, vout, ed in kwargs['enroute']:
                 self.venroute[self.g.edge(vin, vout)] = ed
         else:
-            for e in self.g.get_edges():
+            for e in self.g.edges():
                 self.venroute[e] = deque([])
 
     def get_route(self, src, dst, **kwargs):
@@ -227,7 +233,7 @@ class Net:
 
         route = deque([target])
         sg = gt.search.dijkstra_iterator(
-                self.g, self.vweight, source=source, array=True)
+            self.g, self.vweight, source=source, array=True)
         while route[0] != source:
             found = False
             for check_src, check_dest in sg:
@@ -300,6 +306,8 @@ class Net:
                             self.venroute[e].append(car)
                             car.cur = '{0}-{1}'.format(v, nextvert)
                             car.can_move = False
+                            # TODO: notify car passengers that it arrived to
+                            # next station
                         else:
                             raise RuntimeWarning(
                                 'car#{0} is stuck at vertex {1}: {2}'.format(
@@ -359,7 +367,7 @@ class Net:
         except TypeError:
             raise TypeError(
                 'target expected to be iter(str) or iter(int). '
-                'got {}'.format(type(route))
+                'got {}'.format(type(target))
             )
         if 'amount' in kwargs:
             amount = kwargs['amount']
@@ -377,6 +385,7 @@ class Net:
                 route = self.get_route(target, dst)
             car = Car(route, **kwargs)
             self.vontrack[target].append(car)
+            self.allcars[car.id] = car
 
     def spawn_passenger(self, target, **kwargs):
         """
@@ -400,10 +409,10 @@ class Net:
             randomly generated for each object. Route must include current
             station.
         dst: str or int
-            car travel destination. Can be vertex name or vertex index. `route`
-            and `dst` are self-exclusive, if both are provided, `route` takes
-            priority. If neither `route` nor `dst` are provided, the route
-            is ramdomly generated for each object.
+            object travel destination. Can be vertex name or vertex index.
+            `route` and `dst` are self-exclusive, if both are provided, `route`
+            takes priority. If neither `route` nor `dst` are provided, the
+            route is ramdomly generated for each object.
         other kwargs are passed to a `Passenger` object.
 
         Returns
@@ -422,7 +431,7 @@ class Net:
         except TypeError:
             raise TypeError(
                 'target expected to be str or int. '
-                'got {}'.format(type(route))
+                'got {}'.format(type(target))
             )
         if 'amount' in kwargs:
             amount = kwargs['amount']
@@ -440,6 +449,7 @@ class Net:
                 route = self.get_route(target, dst)
             pgr = Passenger(route, **kwargs)
             self.vinside[target].append(pgr)
+            self.allpassengers[pgr.id] = pgr
 
     def ptransfer(self, targets=None):
         """
@@ -479,12 +489,12 @@ class Net:
             except TypeError:
                 raise TypeError(
                     'targets expected to be iter(str) or iter(int). '
-                    'got {}'.format(type(route))
+                    'got {}'.format(type(targets))
                 )
         else:
             targets = self.g.get_vertices()
         for v in targets:
-            ptransfer = np.ndarray([], dtype='object')
+            ptransfer = np.array([], dtype='object')
             # get all passengers that need transfer or at final destination and
             # place them in buffer
             for car in self.vontrack[v]:
@@ -495,49 +505,86 @@ class Net:
             for _ in range(len(self.vinside[v])):
                 p = self.vinside[v].popleft()
                 # route item will be popped at arrival to the next vertex
-                nextvert = p.route[0]
+                nextvert = p.get_next()
                 if p.namelup:
                     nextvert = self.namelup[nextvert]
-                found = False
-                for car in self.vontrack[v]:
-                    # check if car full
-                    if not len(car.inside) >= car.size:
-                        # TODO: passengers should take cars that have their
-                        # next route vertex as next stop instead of hoping that
-                        # they will eventually arrive
-                        if nextvert in car.route:
-                            car.inside.append(p)
-                            found = True
-                            break
-                if not found:
-                    # place it back and hope for the best
-                    self.vinside[v].append(p)
+                # TODO: too much if?
+                # check if we arrived to the last stop
+                if nextvert != v:
+                    found = False
+                    for car in self.vontrack[v]:
+                        # check if car full
+                        if not len(car.inside) >= car.size:
+                            # TODO: passengers should take cars that have their
+                            # next route vertex as next stop instead of hoping
+                            # that they will eventually arrive
+                            if nextvert in car.route:
+                                car.inside.append(p)
+                                found = True
+                                break
+                    if not found:
+                        # place it back and hope for the best
+                        self.vinside[v].append(p)
+                else:
+                    print('Passenger #{0} at the destination {1}-{2}'.format(
+                        p.id, v, self.vname[v]
+                    ))
             # assign all passengers from buffer to vertex
-            for p in ptransfer:
-                p.route.popleft()
-                self.vinside[v].append(p)
+            if ptransfer.size:
+                for p in ptransfer:
+                    p.route.popleft()
+                    self.vinside[v].append(p)
 
-    def getstat(self):
+    def getstat(self, what='net'):
         """
-        Returns array with statistics
+        Returns array with statistics.
 
-        Order of columns: vname, len(vinside), len(vontrack)
+        For now can return statistics about graph, cars or passengers.
+
+        Array order:
+            net: v, vname, len(vinside), len(vontrack).
+            car: id, cur, route[-1], size, len(inside).
+            pgr: id, cur, route[-1].
 
         Arguments
         ------
-        none yet
+        what: str
+            what kind of statistics to return. Possible options are 'net',
+            'car', 'pgr'.
 
         Returns
         ------
         stat: numpy.ndarray
-            array with statistics
+            array with statistics.
         """
 
-        stat = np.ndarray([])
-        for v in self.g.get_vertices():
-            stat = np.append(stat, [
-                self.vname[v], len(self.vinside[v]), len(self.vontrack[v])
-                ])
+        stat = np.array([])
+        if what == 'net':
+            for v in self.g.get_vertices():
+                cols = [
+                    v, self.vname[v], len(self.vinside[v]),
+                    len(self.vontrack[v])
+                ]
+                stat = np.append(stat, cols)
+            if stat:
+                stat = stat.reshape(len(self.g.get_vertices()), len(cols))
+        elif what == 'car':
+            for _, c in self.allcars.items():
+                cols = [
+                    c.id, c.cur, c.get_next(), c.get_last(),
+                    c.size, len(c.inside)
+                ]
+                stat = np.append(stat, cols)
+            if stat.size:
+                stat = stat.reshape(len(self.allcars), len(cols))
+        elif what == 'pgr':
+            for _, p in self.allpassengers.items():
+                cols = [
+                    p.id, p.cur, p.get_next(), p.get_last()
+                ]
+                stat = np.append(stat, cols)
+            if stat.size:
+                stat = stat.reshape(len(self.allpassengers), len(cols))
         return stat
 
 
@@ -572,8 +619,12 @@ class Car:
 
     Methods
     ------
-    get_ptransfer:
-        returns `Passenger` objects for transfer
+    peject:
+        returns `Passenger` objects for ejection
+    get_next:
+        attepmts to return next destination in `route`
+    get_last:
+        attempts to return last destination in `route`
     """
 
     total = [0]
@@ -611,7 +662,7 @@ class Car:
             self.inside = kwargs['amount']
         else:
             self.inside = deque([])
-        # try to convert list elements into vertex indices
+        # try to convert list elements into deque of vertex indices
         try:
             self.route = deque([int(item) for item in route])
         except ValueError:
@@ -625,15 +676,15 @@ class Car:
             )
         if 'cur' in kwargs:
             try:
-                self.cur = int(cur)
+                self.cur = int(kwargs['cur'])
             except ValueError:
                 # assume it is vertex name
-                self.cur = cur
+                self.cur = kwargs['cur']
                 self.namelup = True
             except TypeError:
                 raise TypeError(
                     'route expected to be iter(str) or iter(int). '
-                    'got {}'.format.type(route)
+                    'got {}'.format(type(route))
                 )
         else:
             self.cur = self.route.popleft()
@@ -662,13 +713,41 @@ class Car:
                 'Car #{0} is at unexpected location.'
                 'Expected {1}, got {2}.'.format(self.id, self.cur, current)
             )
-        ejecting = np.ndarray([], dtype='object')
-        nextvert = self.route[0]
-        for p in self.inside:
+        ejecting = np.array([], dtype='object')
+        nextvert = self.get_next()
+        for _ in range(len(self.inside)):
+            p = self.inside.popleft()
             # check if next destination in route and we will eventually arrive
             # TODO: fix this so passengers can be more picky about cars
-            if not p.route[0] in self.route:
+            if not p.get_next() in self.route:
                 ejecting = np.append(ejecting, p)
+            else:
+                self.inside.append(p)
+        return ejecting
+
+    def get_next(self):
+        """
+        Attempts to return next destination in `route`. If cannot, returns
+        current position
+        """
+        try:
+            nextvert = self.route[0]
+        except IndexError:
+            # nowhere to go - return current station
+            nextvert = self.cur
+        return nextvert
+
+    def get_last(self):
+        """
+        Attempts to return last destination in `route`. If cannot, returns
+        current position
+        """
+        try:
+            nextvert = self.route[-1]
+        except IndexError:
+            # nowhere to go - return current station
+            nextvert = self.cur
+        return nextvert
 
 
 class Passenger:
@@ -694,7 +773,10 @@ class Passenger:
 
     Methods
     ------
-        none yet.
+    get_next:
+        attepmts to return next destination in `route`
+    get_last:
+        attempts to return last destination in `route`
     """
 
     total = [0]
@@ -720,24 +802,45 @@ class Passenger:
 
         # assign id and increment total
         self.id = self.total[0]
-        self.total += 1
+        self.total[0] += 1
         self.namelup = False
-        # check if route contains names
-        if isinstance(route[0], str):
-            # now check if it is actually integers in string form
-            try:
-                self.route = [int(item) for item in route]
-            except ValueError:
-                self.route = route
-                self.namelup = True
-        elif isinstance(route[0], int):
+        # try to convert list elements into deque of vertex indices
+        try:
+            self.route = deque([int(item) for item in route])
+        except ValueError:
+            # assume it is vertex names
             self.route = route
-        else:
-            raise ValueError(
+            self.namelup = True
+        except TypeError:
+            raise TypeError(
                 'route expected to be iter(str) or iter(int). '
-                'got {}'.format.type(route)
+                'got {}'.format(type(route))
             )
-        if cur in kwargs:
+        if 'cur' in kwargs:
             self.cur = kwargs['cur']
         else:
-            self.cur = route[0]
+            self.cur = self.route.popleft()
+
+    def get_next(self):
+        """
+        Attempts to return next destination in `route`. If cannot, returns
+        current position
+        """
+        try:
+            nextvert = self.route[0]
+        except IndexError:
+            # nowhere to go - return current station
+            nextvert = self.cur
+        return nextvert
+
+    def get_last(self):
+        """
+        Attempts to return last destination in `route`. If cannot, returns
+        current position
+        """
+        try:
+            nextvert = self.route[-1]
+        except IndexError:
+            # nowhere to go - return current station
+            nextvert = self.cur
+        return nextvert
