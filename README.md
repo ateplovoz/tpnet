@@ -25,7 +25,7 @@ for object creation or graph modification, imitation of real transport networks
 route.
 
 To create a net one must call `Net` class constructor and provide arguments for
-desired net topology (see docstrings of `Net.__init__()`). Cars are created
+desired net topology (see docstrings of `Net.__init__`). Cars are created
 via `Net.spawn_car` method and, similarly, passengers are created via
 `Net.spawn_passenger` method. Those functions should work consistenly when
 provided with either vertex names or vertex indices.
@@ -38,6 +38,4 @@ cars or passengers statistics tables. If needed, one can access `Net.allcars`
 and `Net.allpassengers` dictionaries to get access to all created cars or
 passengers.
 
-## Acknowledgments
 
-This work is conducted with financial help from JIHT RAS
