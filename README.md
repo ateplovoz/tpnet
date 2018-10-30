@@ -18,6 +18,13 @@ controlled externally. Future of this project includes developing simple API
 for object creation or graph modification, imitation of real transport networks
 (such as Moscow Metro) and developing AI system for control and optimization.
 
+### Requirements
+
+This module is built upon `graph-tool` package. It is necessary to build and
+install in order to use this module. Package can be found on [main
+site](https://graph-tool.skewed.de) and installation instructions can be found
+[here](https://git.skewed.de/count0/graph-tool/wikis/installation-instructions)
+
 ## Quick start
 
 `tpnet.py` provides means of creating and controlling `Net`, `Car` and

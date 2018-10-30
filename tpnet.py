@@ -1,5 +1,8 @@
 """
 ======
+tpnet.py
+main module
+
 TPNet — Transport Net simulation model
 Copyright © 2018 Vadim Pribylov
 
@@ -17,23 +20,31 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ======
 
-Requires:
-    random (standart)
-    collections (standart)
-    numpy
-    graph_tool
+Description
+------
 
-Classes:
-    Net - class for graph network and related functions
-    Car - class that navigates Net and transfers Passenger
-    Passenger - class that represents a passenger
+Requires
+------
+random (standard)
+collections (standard)
+numpy
+graph_tool
 
+db.py
+
+Classes
+------
+Net - class for graph network and related functions
+Car - class that navigates Net and transfers Passenger
+Passenger - class that represents a passenger
 """
 
 import random
 from collections import deque
 import numpy as np
 import graph_tool as gt
+
+from db import new_db, log
 
 
 # TODO: remove vload, it duplicates vinside
@@ -128,6 +139,7 @@ class Net:
         self.g.add_vertex(size)
         self.allcars = {}
         self.allpassengers = {}
+        new_db()
 
         if names:
             self.vname = self.g.new_vertex_property('string')
@@ -289,10 +301,8 @@ class Net:
                     if car.namelup:
                         nextvert = self.namelup[nextvert]
                     self.vontrack[nextvert].append(car)
-                    car.cur = nextvert
+                    car.chcur(nextvert, self.vname[nextvert])
                     car.can_move = False
-                    # TODO: ask passengers inside to kindly remove first
-                    # element in route deque
         for v in self.g.get_vertices():
             for _ in range(len(self.vontrack[v])):
                 car = self.vontrack[v].popleft()
@@ -306,6 +316,11 @@ class Net:
                                 car.id, v, self.vname[v]
                             )
                         )
+                        log(
+                            'i reached destination at {1}: {2}'.format(
+                                car.id, v, self.vname[v]
+                            ), 'car', car.id
+                        )
                         nextvert = None
                     if nextvert:
                         if car.namelup:
@@ -316,7 +331,13 @@ class Net:
                         if nextvert in neighbors:
                             e = self.g.edge(v, nextvert)
                             self.venroute[e].append(car)
-                            car.cur = '{0}-{1}'.format(v, nextvert)
+                            car.chcur(
+                                '{0}-{1}'.format(v, nextvert),
+                                '{0}-{1}'.format(
+                                    self.vname[v],
+                                    self.vname[nextvert]
+                                )
+                            )
                             car.can_move = False
                             # TODO: notify car passengers that it arrived to
                             # next station
@@ -325,6 +346,11 @@ class Net:
                                 'car#{0} is stuck at vertex {1}: {2}'.format(
                                     car.id, v, self.vname[v]
                                 )
+                            )
+                            log(
+                                'i am stuck at vertex {1}: {2}'.format(
+                                    car.id, v, self.vname[v]
+                                ), 'car', car.id
                             )
                 else:
                     self.vontrack[v].append(car)
@@ -398,6 +424,13 @@ class Net:
             car = Car(route, **kwargs)
             self.vontrack[target].append(car)
             self.allcars[car.id] = car
+            log(
+                'created at {0}: {1} with destination {2}: {3}'.format(
+                    target, self.vname[target],
+                    car.get_last(), self.vname[car.get_last()]
+                ),
+                'car', car.id
+            )
 
     def spawn_passenger(self, target, **kwargs):
         """
@@ -462,6 +495,10 @@ class Net:
             pgr = Passenger(route, **kwargs)
             self.vinside[target].append(pgr)
             self.allpassengers[pgr.id] = pgr
+            log('created at {0}: {1} with destination {2}: {3}'.format(
+                target, self.vname[target],
+                pgr.get_last(), self.vname[pgr.get_last()]
+            ), 'pgr', pgr.id)
 
     def ptransfer(self, targets=None):
         """
@@ -533,21 +570,31 @@ class Net:
                             if nextvert in car.route:
                                 car.inside.append(p)
                                 found = True
+                                # log message as passenger TODO: move it to
+                                # Passenger class somehow
+                                log('mounting car {0} at {1}:{2}'.format(
+                                    car.id, v, self.vname[v]
+                                ), 'pgr', p.id)
                                 break
                     if not found:
                         # place it back and hope for the best
                         self.vinside[v].append(p)
                 else:
-                    print('Passenger #{0} at the destination {1}-{2}'.format(
+                    print('Passenger #{0} at the destination {1}: {2}'.format(
                         p.id, v, self.vname[v]
                     ))
+                    log('i am at the destination {1}: {2}'.format(
+                            p.id, v, self.vname[v]
+                    ), 'pgr', p.id)
             # assign all passengers from buffer to vertex
             if ptransfer.size:
                 for p in ptransfer:
+                    newcur = p.get_next()
+                    p.chcur(newcur, self.vname[newcur])
                     p.route.popleft()
                     self.vinside[v].append(p)
 
-    def getstat(self, what='net'):
+    def getstat(self, what='net', h=False):
         """
         Returns array with statistics.
 
@@ -563,6 +610,9 @@ class Net:
         what: str
             what kind of statistics to return. Possible options are 'net',
             'car', 'pgr'.
+        h: bool
+            stands for 'human readable'. If True then returns vertex names
+            instead of vertex indices
 
         Returns
         ------
@@ -582,18 +632,45 @@ class Net:
                 stat = stat.reshape(len(self.g.get_vertices()), len(cols))
         elif what == 'car':
             for _, c in self.allcars.items():
-                cols = [
-                    c.id, c.cur, c.get_next(), c.get_last(),
-                    c.size, len(c.inside)
-                ]
+                if h:
+                    # make it human readable
+                    try:
+                        int(c.cur)
+                        intransition = False
+                    except ValueError:
+                        # car in transition and have `cur` format as `s-t`
+                        intransition = True
+                        s_vert, t_vert = c.cur.split('-')
+                    if intransition:
+                        ccur = '{0}-{1}'.format(
+                            self.vname[s_vert], self.vname[t_vert]
+                        )
+                    else:
+                        ccur = self.vname[c.cur]
+                    cols = [
+                        c.id, ccur, self.vname[c.get_next()],
+                        self.vname[c.get_last()], c.size, len(c.inside)
+                    ]
+                else:
+                    cols = [
+                        c.id, c.cur, c.get_next(), c.get_last(),
+                        c.size, len(c.inside)
+                    ]
                 stat = np.append(stat, cols)
             if stat.size:
                 stat = stat.reshape(len(self.allcars), len(cols))
         elif what == 'pgr':
             for _, p in self.allpassengers.items():
-                cols = [
-                    p.id, p.cur, p.get_next(), p.get_last()
-                ]
+                if h:
+                    # make it human readable
+                    cols = [
+                        p.id, self.vname[p.cur], self.vname[p.get_next()],
+                        self.vname[p.get_last()]
+                    ]
+                else:
+                    cols = [
+                        p.id, p.cur, p.get_next(), p.get_last()
+                    ]
                 stat = np.append(stat, cols)
             if stat.size:
                 stat = stat.reshape(len(self.allpassengers), len(cols))
@@ -637,6 +714,8 @@ class Car:
         attepmts to return next destination in `route`
     get_last:
         attempts to return last destination in `route`
+    chcur:
+        changes `cur` — current location, logs change
     """
 
     total = [0]
@@ -733,8 +812,15 @@ class Car:
             # TODO: fix this so passengers can be more picky about cars
             if not p.get_next() in self.route:
                 ejecting = np.append(ejecting, p)
+                # put message in log as passenger
+                log('ejected from car {0}'.format(self.id), 'pgr', p.id)
             else:
                 self.inside.append(p)
+        # put message in log as car
+        log(
+            'ejecting passengers: {0}'.format([p.id for p in ejecting]),
+            'car', self.id
+        )
         return ejecting
 
     def get_next(self):
@@ -760,6 +846,19 @@ class Car:
             # nowhere to go - return current station
             nextvert = self.cur
         return nextvert
+
+    def chcur(self, newcur, newcurname=None):
+        """
+        Changes `cur` value to a `newcur`. Writes change in database
+
+        If `namelup` is True, then, for consistency, write `cur` as vertex
+        name.
+        """
+        if self.namelup and newcurname:
+            self.cur = newcurname
+        else:
+            self.cur = newcur
+        log('i am at {0}: {1}'.format(newcur, newcurname), 'car', self.id)
 
 
 class Passenger:
@@ -789,6 +888,8 @@ class Passenger:
         attepmts to return next destination in `route`
     get_last:
         attempts to return last destination in `route`
+    chcur:
+        changes `cur` — current location, logs change
     """
 
     total = [0]
@@ -856,3 +957,16 @@ class Passenger:
             # nowhere to go - return current station
             nextvert = self.cur
         return nextvert
+
+    def chcur(self, newcur, newcurname=None):
+        """
+        Changes `cur` value to a `newcur`. Writes change in database
+
+        If `namelup` is True, then, for consistency, write `cur` as vertex
+        name.
+        """
+        if self.namelup and newcurname:
+            self.cur = newcurname
+        else:
+            self.cur = newcur
+        log('i am at {0}: {1}'.format(newcur, newcurname), 'pgr', self.id)
