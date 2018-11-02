@@ -1,6 +1,9 @@
-*.swp
 .ipynb_checkpoints
 .graph-tool
 graph-tool
 venv
 __pycache__
+db
+
+*.swp
+.metrics
