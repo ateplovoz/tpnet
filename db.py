@@ -81,7 +81,7 @@ def new_db():
     current = datetime.datetime.now()
     filename = os.path.join(
         os.getcwd(), 'db',
-        '{0}{1}{2}_{3}{4}.sqlite3_db'.format(
+        '{0:04}{1:02}{2:02}_{3:02}{4:02}.db'.format(
             current.year, current.month, current.day,
             current.hour, current.minute
         )
@@ -100,7 +100,7 @@ def clean_db():
     """
 
     i = 0
-    for dbfile in glob.glob(os.path.join(os.getcwd(), 'db', '*.sqlite3_db')):
+    for dbfile in glob.glob(os.path.join(os.getcwd(), 'db', '*.db')):
         i += 1
         os.remove(dbfile)
     print('{0} files deleted'.format(i))

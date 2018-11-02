@@ -297,34 +297,37 @@ class Net:
             for _ in range(len(self.venroute[e])):
                 car = self.venroute[e].popleft()
                 if car.can_move:
-                    nextvert = car.route.popleft()
+                    nextvert = car.pop_next()
                     if car.namelup:
                         nextvert = self.namelup[nextvert]
                     self.vontrack[nextvert].append(car)
                     car.chcur(nextvert, self.vname[nextvert])
                     car.can_move = False
+                else:
+                    self.venroute[e].append(car)
         for v in self.g.get_vertices():
             for _ in range(len(self.vontrack[v])):
                 car = self.vontrack[v].popleft()
                 if car.can_move:
                     # popleft next vertex from route
-                    try:
-                        nextvert = car.route[0]
-                    except IndexError:
+                    nextvert = car.get_next()
+                    if car.namelup:
+                        nextvert = self.namelup[nextvert]
+                    if nextvert == v:
+                        # car reached destination
                         print(
-                            'Car #{0} reached destination at {1}: {2}'.format(
+                            'Car {0} reached destination at {1}: {2}'.format(
                                 car.id, v, self.vname[v]
                             )
                         )
+                        # put message in log as car
                         log(
                             'i reached destination at {1}: {2}'.format(
                                 car.id, v, self.vname[v]
                             ), 'car', car.id
                         )
-                        nextvert = None
-                    if nextvert:
-                        if car.namelup:
-                            nextvert = self.namelup[nextvert]
+                        self.allcars.pop(car.id)
+                    else:
                         # since graph is not directional, doesn't matter if we
                         # use get_in_neighbors or get_out_neighbors
                         neighbors = self.g.get_in_neighbors(self.g.vertex(v))
@@ -554,12 +557,12 @@ class Net:
             for _ in range(len(self.vinside[v])):
                 p = self.vinside[v].popleft()
                 # route item will be popped at arrival to the next vertex
-                nextvert = p.get_next()
+                plastvert = p.get_last()
                 if p.namelup:
-                    nextvert = self.namelup[nextvert]
+                    plastvert = self.namelup[nextvert]
                 # TODO: too much if?
                 # check if we arrived to the last stop
-                if nextvert != v:
+                if plastvert != v:
                     found = False
                     for car in self.vontrack[v]:
                         # check if car full
@@ -567,7 +570,7 @@ class Net:
                             # TODO: passengers should take cars that have their
                             # next route vertex as next stop instead of hoping
                             # that they will eventually arrive
-                            if nextvert in car.route:
+                            if plastvert in car.route:
                                 car.inside.append(p)
                                 found = True
                                 # log message as passenger TODO: move it to
@@ -586,6 +589,7 @@ class Net:
                     log('i am at the destination {1}: {2}'.format(
                             p.id, v, self.vname[v]
                     ), 'pgr', p.id)
+                    self.allpassengers.pop(p.id)
             # assign all passengers from buffer to vertex
             if ptransfer.size:
                 for p in ptransfer:
@@ -648,12 +652,12 @@ class Net:
                     else:
                         ccur = self.vname[c.cur]
                     cols = [
-                        c.id, ccur, self.vname[c.get_next()],
+                        c.id, ccur, self.vname[c.get_next()[0]],
                         self.vname[c.get_last()], c.size, len(c.inside)
                     ]
                 else:
                     cols = [
-                        c.id, c.cur, c.get_next(), c.get_last(),
+                        c.id, c.cur, c.get_next()[0], c.get_last(),
                         c.size, len(c.inside)
                     ]
                 stat = np.append(stat, cols)
@@ -712,6 +716,8 @@ class Car:
         returns `Passenger` objects for ejection
     get_next:
         attepmts to return next destination in `route`
+    pop_next:
+        attempts to pop and return next destination in `route`
     get_last:
         attempts to return last destination in `route`
     chcur:
@@ -742,6 +748,9 @@ class Car:
             what you are doing, because this may lead to stuck cars.  `cur`
             must be same type as `route` to avoid improper `namelup`
             assignment. Default: `route[0]`.
+        repeat: bool
+            whether car should repeat its route. If True, then route vertices
+            get appended back and never disappear
         """
 
         self.id = self.total[0]
@@ -749,6 +758,7 @@ class Car:
         self.size = size
         self.namelup = False
         self.can_move = True
+        self.repeat = False
         if 'amount' in kwargs:
             self.inside = kwargs['amount']
         else:
@@ -780,6 +790,9 @@ class Car:
         else:
             self.cur = self.route.popleft()
 
+        if 'repeat' in kwargs:
+            self.repeat = bool(kwargs['repeat'])
+
     def peject(self, current):
         """
         returns array of `Passenger` objects (taken from `inside` attribute)
@@ -810,23 +823,24 @@ class Car:
             p = self.inside.popleft()
             # check if next destination in route and we will eventually arrive
             # TODO: fix this so passengers can be more picky about cars
-            if not p.get_next() in self.route:
+            if p.get_last() in self.route:
+                self.inside.append(p)
+            else:
                 ejecting = np.append(ejecting, p)
                 # put message in log as passenger
                 log('ejected from car {0}'.format(self.id), 'pgr', p.id)
-            else:
-                self.inside.append(p)
-        # put message in log as car
-        log(
-            'ejecting passengers: {0}'.format([p.id for p in ejecting]),
-            'car', self.id
-        )
+        if ejecting:
+            # put message in log as car
+            log(
+                'ejecting passengers: {0}'.format([p.id for p in ejecting]),
+                'car', self.id
+            )
         return ejecting
 
-    def get_next(self):
+    def get_next(self, getstatus=False):
         """
         Attempts to return next destination in `route`. If cannot, returns
-        current position
+        current position.
         """
         try:
             nextvert = self.route[0]
@@ -835,10 +849,20 @@ class Car:
             nextvert = self.cur
         return nextvert
 
+    def pop_next(self):
+        """
+        Attempts to take and return next destination in `route`. If car route
+        is circular, appends taken route vertex back.
+        """
+        nextvert = self.route.popleft()
+        if self.repeat:
+            self.route.append(nextvert)
+        return nextvert
+
     def get_last(self):
         """
         Attempts to return last destination in `route`. If cannot, returns
-        current position
+        current position.
         """
         try:
             nextvert = self.route[-1]
