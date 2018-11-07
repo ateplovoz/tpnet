@@ -1,0 +1,170 @@
+[
+  {
+    "name": "Alpha",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Beta",
+        "w": 1
+      },
+      {
+        "t": "Ursa",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Beta",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Callisto",
+        "w": 1
+      },
+      {
+        "t": "Draco",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Callisto",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Sun",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Draco",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Gemini",
+        "w": 1
+      },
+      {
+        "t": "Lynx",
+        "w": 1
+      },
+      {
+        "t": "Phoenix",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Gemini",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Hydra",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Hydra",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+    ]
+  },
+  {
+    "name": "Lynx",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+    ]
+  },
+  {
+    "name": "Orion",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+    ]
+  },
+  {
+    "name": "Phoenix",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Ursa",
+        "w": 1
+      },
+      {
+        "t": "Andromeda",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Ursa",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Sirius",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Sun",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+      {
+        "t": "Lynx",
+        "w": 1
+      },
+      {
+        "t": "Pluto",
+        "w": 1
+      }
+    ]
+  },
+  {
+    "name": "Sirius",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+    ]
+  },
+  {
+    "name": "Andromeda",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+    ]
+  },
+  {
+    "name": "Pluto",
+    "loadargs": [],
+    "inside": [],
+    "ontrack": [],
+    "edges": [
+    ]
+  }
+]

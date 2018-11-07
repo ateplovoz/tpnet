@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ======
 tpnet.py
@@ -22,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 Description
 ------
+TODO: write description
 
 Requires
 ------
@@ -60,8 +62,6 @@ class Net:
         vertex names. Might be absent if no names were provided to constructor.
     namelup: dict
         dictionary that provides index lookup by name.
-    vload: graph_tool.PropertyMap (type: object)
-        current load of each vertex.
     vloadargs: graph_tool.PropertyMap (type: vector<float>)
         attributes of function for periodic load change.
     vinside: graph_tool.PropertyMap (type: object)
@@ -110,9 +110,6 @@ class Net:
         ------
         max_random_edges: int
             amount of random edges to generate. Default: `size`*2.
-        load: iter(`Passenger`)
-            iterator of starting load for vertices. Must contain Passenger
-            class objects. Default: [].
         loadargs: iter(tuple(float, float))
             iterator of (frequency, offset) of periodic load function, must be
             size of `size`. This influences on how many Passenger-class objects
@@ -135,7 +132,7 @@ class Net:
 
         """
 
-        self.g = gt.Graph(directed=False)
+        self.g = gt.Graph(directed=True)
         self.g.add_vertex(size)
         self.allcars = {}
         self.allpassengers = {}
@@ -167,14 +164,6 @@ class Net:
                 for first, second in random_edges
             ]
         self.g.add_edge_list(edges_indexed)
-
-        self.vload = self.g.new_vertex_property('object')
-        if 'load' in kwargs:
-            for v, l in zip(self.g.vertices(), kwargs['load']):
-                self.vload[v] = l
-        else:
-            for v in self.g.vertices():
-                self.vload[v] = []
 
         if 'loadargs' in kwargs:
             self.vloadargs = self.g.new_vertex_property('vector<float>')
@@ -330,7 +319,9 @@ class Net:
                     else:
                         # since graph is not directional, doesn't matter if we
                         # use get_in_neighbors or get_out_neighbors
-                        neighbors = self.g.get_in_neighbors(self.g.vertex(v))
+                        # CHANGED in v0.1.1: graph is directional now, so we
+                        # have to use `Graph.get_out_neighbors`
+                        neighbors = self.g.get_out_neighbors(self.g.vertex(v))
                         if nextvert in neighbors:
                             e = self.g.edge(v, nextvert)
                             self.venroute[e].append(car)
