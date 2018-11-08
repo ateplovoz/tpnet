@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 ======
-__init__.py
-init module
+hl.py
+high level control module
 
 TPNet — Transport Net simulation model
 Copyright © 2018 Vadim Pribylov
@@ -11,7 +11,6 @@ This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
-
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -61,9 +60,9 @@ config = {
 }
 
 
-def net_from_csv(netfile):
+def net_from_json(netfile):
     """
-    Creates Net from CSV file
+    Creates Net from JSON file
 
     Arguments
     -------
@@ -72,3 +71,17 @@ def net_from_csv(netfile):
         example_net.json file.
     """
     netdict = json.loads(open(netfile).read())
+    vertnames = []
+    insides = []
+    carsontrack = []
+    edges = []
+    for vert in netdict:
+        vertnames.append(vert['name'])
+        insides.append(vert['inside'])
+        carsontrack.append(vert['ontrack'])
+        for edge in vert['edges']:
+            edges.append((vert['name'], edge['t']))
+    return tpnet.Net(
+        len(vertnames), vertnames, edges,
+        inside=insides, ontrack=carsontrack
+    )
