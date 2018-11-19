@@ -330,7 +330,7 @@ class Net:
                                 '{0}-{1}'.format(
                                     self.vname[v],
                                     self.vname[nextvert]
-                                )
+                                ), update_inside=False
                             )
                             car.can_move = False
                             # TODO: notify car passengers that it arrived to
@@ -548,20 +548,17 @@ class Net:
             for _ in range(len(self.vinside[v])):
                 p = self.vinside[v].popleft()
                 # route item will be popped at arrival to the next vertex
-                plastvert = p.get_last()
+                pnextvert = p.get_next()
                 if p.namelup:
-                    plastvert = self.namelup[nextvert]
+                    pnextvert = self.namelup[nextvert]
                 # TODO: too much if?
                 # check if we arrived to the last stop
-                if plastvert != v:
+                if pnextvert != v:
                     found = False
                     for car in self.vontrack[v]:
                         # check if car full
                         if not len(car.inside) >= car.size:
-                            # TODO: passengers should take cars that have their
-                            # next route vertex as next stop instead of hoping
-                            # that they will eventually arrive
-                            if plastvert in car.route:
+                            if pnextvert in car.route:
                                 car.inside.append(p)
                                 found = True
                                 # log message as passenger TODO: move it to
@@ -584,9 +581,9 @@ class Net:
             # assign all passengers from buffer to vertex
             if ptransfer.size:
                 for p in ptransfer:
-                    newcur = p.get_next()
-                    p.chcur(newcur, self.vname[newcur])
-                    p.route.popleft()
+                    # newcur = p.get_next()
+                    # p.chcur(newcur, self.vname[newcur])
+                    # p.route.popleft()
                     self.vinside[v].append(p)
 
     def getstat(self, what='net', h=False):
@@ -812,15 +809,13 @@ class Car:
         nextvert = self.get_next()
         for _ in range(len(self.inside)):
             p = self.inside.popleft()
-            # check if next destination in route and we will eventually arrive
-            # TODO: fix this so passengers can be more picky about cars
-            if p.get_last() in self.route:
+            if p.get_next() in self.route:
                 self.inside.append(p)
             else:
                 ejecting = np.append(ejecting, p)
                 # put message in log as passenger
                 log('ejected from car {0}'.format(self.id), 'pgr', p.id)
-        if ejecting:
+        if ejecting.size != 0:
             # put message in log as car
             log(
                 'ejecting passengers: {0}'.format([p.id for p in ejecting]),
@@ -862,17 +857,29 @@ class Car:
             nextvert = self.cur
         return nextvert
 
-    def chcur(self, newcur, newcurname=None):
+    def chcur(self, newcur, newcurname=None, update_inside=True):
         """
         Changes `cur` value to a `newcur`. Writes change in database
 
-        If `namelup` is True, then, for consistency, write `cur` as vertex
-        name.
+        Arguments
+        ------
+        newcur: str
+            new current position, if `namelup` is True, then it is not used.
+        newcurname: str
+            new current position name. Used when `namelup` is True and for
+            logging purposes.
+        update_inside: bool
+            if True, then updates current position of passeger objects inside.
+            Set to False when travelling to edges.
         """
         if self.namelup and newcurname:
             self.cur = newcurname
         else:
             self.cur = newcur
+        for p in self.inside:
+            p.chcur(newcur, newcurname)
+            if update_inside:
+                p.route.popleft()
         log('i am at {0}: {1}'.format(newcur, newcurname), 'car', self.id)
 
 

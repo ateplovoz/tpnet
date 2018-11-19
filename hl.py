@@ -52,6 +52,7 @@ units: str (default 's')
 
 import json
 import tpnet
+from collections import deque
 
 config = {
     'evalt': 1000,
@@ -77,8 +78,8 @@ def net_from_json(netfile):
     edges = []
     for vert in netdict:
         vertnames.append(vert['name'])
-        insides.append(vert['inside'])
-        carsontrack.append(vert['ontrack'])
+        insides.append(deque(vert['inside']))
+        carsontrack.append(deque(vert['ontrack']))
         for edge in vert['edges']:
             edges.append((vert['name'], edge['t']))
     return tpnet.Net(
