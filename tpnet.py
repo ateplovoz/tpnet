@@ -567,6 +567,11 @@ class Net:
                                     car.id, v, self.vname[v]
                                 ), 'pgr', p.id)
                                 break
+                        else:
+                            # log message as passenger
+                            log('cannot get in car {0}: it is full'.format(
+                                car.id
+                            ), 'pgr', p.id)
                     if not found:
                         # place it back and hope for the best
                         self.vinside[v].append(p)
