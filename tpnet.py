@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# vim: ts=4 sw=4 tw=79
 """
 ======
 tpnet.py
@@ -14,11 +15,11 @@ the Free Software Foundation, either version 3 of the License, or
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+along with this program.    If not, see <https://www.gnu.org/licenses/>.
 ======
 
 Description
@@ -46,7 +47,7 @@ from collections import deque
 import numpy as np
 import graph_tool as gt
 
-from db import new_db, log
+from db import new_db, CurrentDb
 
 
 # TODO: remove vload, it duplicates vinside
@@ -258,7 +259,7 @@ class Net:
                 raise RuntimeError('cannot find route')
         return route
 
-    def move_cars(self, unlock=True):
+    def move_cars(self, unlock=True, **kwargs):
         """
         Evaluates all vertices and attempts to move `Car` object in `vontrack`
         deque along their paths.
@@ -266,7 +267,7 @@ class Net:
         Moves `Car` objects in two steps. First, checks the edges for cars in
         transition. Any cars found will be transferred to according vertices
         and locked.  At second step checks the vertices for cars that can move
-        along route.  If found, transfers them to according edge and locks
+        along route.    If found, transfers them to according edge and locks
         them. After finishing, if `unlock` is True, unlocks all cars.
 
         Stuck cars raise RuntimeError and are despawned after. If car reaches
@@ -277,84 +278,108 @@ class Net:
         unlock: bool
             if True, unlocks all cars after moving. Default: True.
 
+        Kwargs
+        ------
+        silent: any
+            set to any value to suppress printing output
+
+        Functions
+        ------
+        move_cars_to_vertices:
+            moves cars from edges' `venroute` to vertex's `vontrack`
+
+        move_cars_to_edges:
+            moves cars from vertex's `vontrack` to edges' `venroute`
+
         Returns
         ------
         nuffin.
         """
 
-        for e in self.g.edges():
-            for _ in range(len(self.venroute[e])):
-                car = self.venroute[e].popleft()
-                if car.can_move:
-                    nextvert = car.pop_next()
-                    if car.namelup:
-                        nextvert = self.namelup[nextvert]
-                    self.vontrack[nextvert].append(car)
-                    car.chcur(nextvert, self.vname[nextvert])
-                    car.can_move = False
-                else:
+        def move_cars_to_vertices(database=None):
+            # TODO: write docstring
+            nextvert = car.take_next()
+            if car.namelup:
+                nextvert = self.namelup[nextvert]
+            self.vontrack[nextvert].append(car)
+            # if db is not provided, `chcur` will raise warning
+            car.chcur(nextvert, self.vname[nextvert], database=db)
+            car.can_move = False
+
+        def move_cars_to_edges(database=None):
+            # TODO: write docstring
+            # popleft next vertex from route
+            nextvert = car.get_next()
+            if car.namelup:
+                nextvert = self.namelup[nextvert]
+            if nextvert == v:
+                # car reached destination
+                if 'silent' not in kwargs:
+                    print(
+                        'Car {0} reached destination at {1}: {2}'.format(
+                            car.id, v, self.vname[v]
+                        )
+                    )
+                # put message in log as car
+                db.log(
+                    'i reached destination at {0}: {1}'.format(
+                        v, self.vname[v]
+                    ), 'car', car.id
+                )
+                self.allcars.pop(car.id)
+            else:
+                # since graph is not directional, doesn't matter if we
+                # use get_in_neighbors or get_out_neighbors
+                # CHANGED in v0.1.1: graph is directional now, so we
+                # have to use `Graph.get_out_neighbors`
+                neighbors = self.g.get_out_neighbors(self.g.vertex(v))
+                if nextvert in neighbors:
+                    e = self.g.edge(v, nextvert)
                     self.venroute[e].append(car)
-        for v in self.g.get_vertices():
-            for _ in range(len(self.vontrack[v])):
-                car = self.vontrack[v].popleft()
-                if car.can_move:
-                    # popleft next vertex from route
-                    nextvert = car.get_next()
-                    if car.namelup:
-                        nextvert = self.namelup[nextvert]
-                    if nextvert == v:
-                        # car reached destination
-                        print(
-                            'Car {0} reached destination at {1}: {2}'.format(
-                                car.id, v, self.vname[v]
-                            )
-                        )
-                        # put message in log as car
-                        log(
-                            'i reached destination at {1}: {2}'.format(
-                                car.id, v, self.vname[v]
-                            ), 'car', car.id
-                        )
-                        self.allcars.pop(car.id)
-                    else:
-                        # since graph is not directional, doesn't matter if we
-                        # use get_in_neighbors or get_out_neighbors
-                        # CHANGED in v0.1.1: graph is directional now, so we
-                        # have to use `Graph.get_out_neighbors`
-                        neighbors = self.g.get_out_neighbors(self.g.vertex(v))
-                        if nextvert in neighbors:
-                            e = self.g.edge(v, nextvert)
-                            self.venroute[e].append(car)
-                            car.chcur(
-                                '{0}-{1}'.format(v, nextvert),
-                                '{0}-{1}'.format(
-                                    self.vname[v],
-                                    self.vname[nextvert]
-                                ), update_inside=False
-                            )
-                            car.can_move = False
-                            # TODO: notify car passengers that it arrived to
-                            # next station
-                        else:
-                            raise RuntimeWarning(
-                                'car#{0} is stuck at vertex {1}: {2}'.format(
-                                    car.id, v, self.vname[v]
-                                )
-                            )
-                            log(
-                                'i am stuck at vertex {1}: {2}'.format(
-                                    car.id, v, self.vname[v]
-                                ), 'car', car.id
-                            )
+                    car.chcur(
+                        '{0}-{1}'.format(v, nextvert),
+                        '{0}-{1}'.format(
+                            self.vname[v],
+                            self.vname[nextvert]
+                        ), update_inside=False, database=db
+                    )
+                    car.can_move = False
+                    # TODO: notify car passengers that it arrived to
+                    # next station
                 else:
-                    self.vontrack[v].append(car)
-        # unlock all cars for next step
-        for v in self.g.vertices():
-            for car in self.vontrack[v]:
-                car.can_move = True
-        for e in self.g.edges():
-            for car in self.venroute[e]:
-                car.can_move = True
+                    raise RuntimeWarning(
+                        'car#{0} is stuck at vertex {1}: {2}'.format(
+                            car.id, v, self.vname[v]
+                        )
+                    )
+                    db.log(
+                        'i am stuck at vertex {1}: {2}'.format(
+                            car.id, v, self.vname[v]
+                        ), 'car', car.id
+                    )
+
+        with CurrentDb() as db:
+            for e in self.g.edges():
+                for _ in range(len(self.venroute[e])):
+                    car = self.venroute[e].popleft()
+                    if car.can_move:
+                        move_cars_to_vertices(database=db)
+                    else:
+                        self.venroute[e].append(car)
+            for v in self.g.get_vertices():
+                for _ in range(len(self.vontrack[v])):
+                    car = self.vontrack[v].popleft()
+                    if car.can_move:
+                        move_cars_to_edges(database=db)
+                    else:
+                        self.vontrack[v].append(car)
+            # unlock all cars for next step
+            for v in self.g.vertices():
+                for car in self.vontrack[v]:
+                    car.can_move = True
+            for e in self.g.edges():
+                for car in self.venroute[e]:
+                    car.can_move = True
 
     def spawn_car(self, target, **kwargs):
         """
@@ -369,7 +394,7 @@ class Net:
         Kwargs
         -----
         amount: int
-            how many objects to spawn.
+            how many objects to spawn at the target vertex. If route or dst
         route: collections.deque([int])
             route deque. Using `get_route` method is recommended. `route` and
             `dst` are self-exclusive, if both are provided, `route` takes
@@ -381,7 +406,6 @@ class Net:
             and `dst` are self-exclusive, if both are provided, `route` takes
             priority. If neither `route` nor `dst` are provided, the route
             is ramdomly generated for each object.
-        other kwargs are passed to a `Car` object.
 
         Returns
         ------
@@ -402,29 +426,62 @@ class Net:
                 'got {}'.format(type(target))
             )
         if 'amount' in kwargs:
-            amount = kwargs['amount']
+            amount = kwargs.pop('amount')
         else:
             amount = 1
-        for _ in range(amount):
-            if 'route' in kwargs:
-                route = kwargs.pop('route')
-            elif 'dst' in kwargs:
-                route = self.get_route(target, kwargs.pop('dst'))
-            else:
+        with CurrentDb() as db:
+            for _ in range(amount):
+                if 'route' in kwargs:
+                    route = kwargs['route']
+                elif 'dst' in kwargs:
+                    route = self.get_route(target, kwargs.pop('dst'))
+                else:
+                    dst = np.random.choice(
+                        np.delete(self.g.get_vertices(), target)
+                    )
+                    route = self.get_route(target, dst)
+                # TODO: make sure all kwargs are passed to cars properly
+                car = Car(route)
+                self.vontrack[target].append(car)
+                self.allcars[car.id] = car
+                db.log(
+                    'created at {0}: {1} with destination {2}: {3}'.format(
+                        target, self.vname[target],
+                        car.get_last(), self.vname[car.get_last()]
+                    ),
+                    'car', car.id
+                )
+
+    def spawn_random_cars(self, amount):
+        """
+        Spawns `amount` of cars with random starting position and random
+        destination.
+
+        This is much faster than spawning cars individually with `spawn_car`.
+
+        Arguments
+        ------
+        amount: int
+            how many cars to spawn
+        """
+
+        with CurrentDb() as db:
+            for _ in range(amount):
+                target = np.random.choice(self.g.get_vertices())
                 dst = np.random.choice(
                     np.delete(self.g.get_vertices(), target)
                 )
                 route = self.get_route(target, dst)
-            car = Car(route, **kwargs)
-            self.vontrack[target].append(car)
-            self.allcars[car.id] = car
-            log(
-                'created at {0}: {1} with destination {2}: {3}'.format(
-                    target, self.vname[target],
-                    car.get_last(), self.vname[car.get_last()]
-                ),
-                'car', car.id
-            )
+                car = Car(route)
+                self.vontrack[target].append(car)
+                self.allcars[car.id] = car
+                db.log(
+                    'created at {0}: {1} with destination {2}: {3}'.format(
+                        target, self.vname[target],
+                        car.get_last(), self.vname[car.get_last()]
+                    ),
+                    'car', car.id
+                )
 
     def spawn_passenger(self, target, **kwargs):
         """
@@ -452,7 +509,6 @@ class Net:
             `route` and `dst` are self-exclusive, if both are provided, `route`
             takes priority. If neither `route` nor `dst` are provided, the
             route is ramdomly generated for each object.
-        other kwargs are passed to a `Passenger` object.
 
         Returns
         ------
@@ -476,25 +532,55 @@ class Net:
             amount = kwargs['amount']
         else:
             amount = 1
-        for _ in range(amount):
-            if 'route' in kwargs:
-                route = kwargs.pop('route')
-            elif 'dst' in kwargs:
-                route = self.get_route(target, kwargs.pop('dst'))
-            else:
+        with CurrentDb() as db:
+            for _ in range(amount):
+                if 'route' in kwargs:
+                    route = kwargs['route']
+                elif 'dst' in kwargs:
+                    route = self.get_route(target, kwargs.pop('dst'))
+                else:
+                    dst = np.random.choice(
+                        np.delete(self.g.get_vertices(), target)
+                    )
+                    route = self.get_route(target, dst)
+                pgr = Passenger(route)
+                self.vinside[target].append(pgr)
+                self.allpassengers[pgr.id] = pgr
+                db.log('created at {0}: {1} with destination {2}: {3}'.format(
+                    target, self.vname[target],
+                    pgr.get_last(), self.vname[pgr.get_last()]
+                ), 'pgr', pgr.id)
+
+    def spawn_random_passengers(self, amount):
+        """
+        Spawns `amount` of passengers with random starting position and random
+        destination.
+
+        This is much faster than spawning passengers individually with
+        `spawn_passenger`.
+
+        Arguments
+        ------
+        amount: int
+            how many passengers to spawn
+        """
+
+        with CurrentDb() as db:
+            for _ in range(amount):
+                target = np.random.choice(self.g.get_vertices())
                 dst = np.random.choice(
                     np.delete(self.g.get_vertices(), target)
                 )
                 route = self.get_route(target, dst)
-            pgr = Passenger(route, **kwargs)
-            self.vinside[target].append(pgr)
-            self.allpassengers[pgr.id] = pgr
-            log('created at {0}: {1} with destination {2}: {3}'.format(
-                target, self.vname[target],
-                pgr.get_last(), self.vname[pgr.get_last()]
-            ), 'pgr', pgr.id)
+                pgr = Passenger(route)
+                self.vinside[target].append(pgr)
+                self.allpassengers[pgr.id] = pgr
+                db.log('created at {0}: {1} with destination {2}: {3}'.format(
+                    target, self.vname[target],
+                    pgr.get_last(), self.vname[pgr.get_last()]
+                ), 'pgr', pgr.id)
 
-    def ptransfer(self, targets=None):
+    def ptransfer(self, targets=None, **kwargs):
         """
         Transfers `Passenger` objects from and into `Car` objects.
 
@@ -511,13 +597,41 @@ class Net:
 
         Kwargs
         ------
-        none yet.
+        silent: any
+            set to any value to suppress printing output
+
+        Functions
+        ------
+        put_passenger_inside:
+            attempts to transfer passenger to `inside` attribute of target car
 
         Returns
         ------
         ptransfer: iter(`Passenger`)
             iterator of `Passenger` objects.
         """
+
+        def put_passenger_inside(p, car, v):
+            # TODO: write docstring
+            # check if car full
+            if not len(car.inside) >= car.size:
+                if pnextvert in car.route:
+                    car.inside.append(p)
+                    # log message as passenger TODO: move it to
+                    # Passenger class somehow
+                    db.log('mounting car {0} at {1}:{2}'.format(
+                        car.id, v, self.vname[v]
+                    ), 'pgr', p.id)
+                    # break so we don't look for another car for
+                    # passenger
+                    return True
+            else:
+                # log message as passenger
+                db.log('cannot get in car {0}: it is full'.format(
+                    car.id
+                ), 'pgr', p.id)
+                return False
+
         if targets:
             try:
                 targets = [int(item) for item in targets]
@@ -536,60 +650,51 @@ class Net:
                 )
         else:
             targets = self.g.get_vertices()
-        for v in targets:
-            ptransfer = np.array([], dtype='object')
-            # get all passengers that need transfer or at final destination and
-            # place them in buffer
-            for car in self.vontrack[v]:
-                ptransfer = np.append(
-                    ptransfer,
-                    car.peject(v)
-                )
-            for _ in range(len(self.vinside[v])):
-                p = self.vinside[v].popleft()
-                # route item will be popped at arrival to the next vertex
-                pnextvert = p.get_next()
-                if p.namelup:
-                    pnextvert = self.namelup[nextvert]
-                # TODO: too much if?
-                # check if we arrived to the last stop
-                if pnextvert != v:
-                    found = False
-                    for car in self.vontrack[v]:
-                        # check if car full
-                        if not len(car.inside) >= car.size:
-                            if pnextvert in car.route:
-                                car.inside.append(p)
-                                found = True
-                                # log message as passenger TODO: move it to
-                                # Passenger class somehow
-                                log('mounting car {0} at {1}:{2}'.format(
-                                    car.id, v, self.vname[v]
-                                ), 'pgr', p.id)
+        with CurrentDb() as db:
+            for v in targets:
+                ptransfer = np.array([], dtype='object')
+                # get all passengers that need transfer or at final destination
+                # and place them in buffer
+                for car in self.vontrack[v]:
+                    ptransfer = np.append(
+                        ptransfer,
+                        car.peject(v, database=db)
+                    )
+                for _ in range(len(self.vinside[v])):
+                    p = self.vinside[v].popleft()
+                    # route item will be popped at arrival to the next vertex
+                    pnextvert = p.get_next()
+                    if p.namelup:
+                        pnextvert = self.namelup[nextvert]
+                    # check if we arrived to the last stop
+                    if pnextvert != v:
+                        found = False
+                        for car in self.vontrack[v]:
+                            found = put_passenger_inside(p, car, v)
+                            if found:
                                 break
-                        else:
-                            # log message as passenger
-                            log('cannot get in car {0}: it is full'.format(
-                                car.id
-                            ), 'pgr', p.id)
-                    if not found:
-                        # place it back and hope for the best
+                        if not found:
+                            # place it back and hope for the best
+                            self.vinside[v].append(p)
+                    else:
+                        if 'silent' not in kwargs:
+                            print(
+                                'Passenger #{0} at the'
+                                'destination {1}: {2}'.format(
+                                    p.id, v, self.vname[v]
+                                )
+                            )
+                        db.log('i am at the destination {0}: {1}'.format(
+                            v, self.vname[v]
+                        ), 'pgr', p.id)
+                        self.allpassengers.pop(p.id)
+                # assign all passengers from buffer to vertex
+                if ptransfer.size:
+                    for p in ptransfer:
+                        # newcur = p.get_next()
+                        # p.chcur(newcur, self.vname[newcur])
+                        # p.route.popleft()
                         self.vinside[v].append(p)
-                else:
-                    print('Passenger #{0} at the destination {1}: {2}'.format(
-                        p.id, v, self.vname[v]
-                    ))
-                    log('i am at the destination {1}: {2}'.format(
-                            p.id, v, self.vname[v]
-                    ), 'pgr', p.id)
-                    self.allpassengers.pop(p.id)
-            # assign all passengers from buffer to vertex
-            if ptransfer.size:
-                for p in ptransfer:
-                    # newcur = p.get_next()
-                    # p.chcur(newcur, self.vname[newcur])
-                    # p.route.popleft()
-                    self.vinside[v].append(p)
 
     def getstat(self, what='net', h=False):
         """
@@ -709,7 +814,7 @@ class Car:
         returns `Passenger` objects for ejection
     get_next:
         attepmts to return next destination in `route`
-    pop_next:
+    take_next:
         attempts to pop and return next destination in `route`
     get_last:
         attempts to return last destination in `route`
@@ -738,7 +843,7 @@ class Car:
             `Passenger` objects. Default: deque([]).
         cur: str or int
             starting position of car. Avoid using this argument unless you know
-            what you are doing, because this may lead to stuck cars.  `cur`
+            what you are doing, because this may lead to stuck cars.    `cur`
             must be same type as `route` to avoid improper `namelup`
             assignment. Default: `route[0]`.
         repeat: bool
@@ -752,8 +857,8 @@ class Car:
         self.namelup = False
         self.can_move = True
         self.repeat = False
-        if 'amount' in kwargs:
-            self.inside = kwargs['amount']
+        if 'inside' in kwargs:
+            self.inside = kwargs['inside']
         else:
             self.inside = deque([])
         # try to convert list elements into deque of vertex indices
@@ -786,7 +891,7 @@ class Car:
         if 'repeat' in kwargs:
             self.repeat = bool(kwargs['repeat'])
 
-    def peject(self, current):
+    def peject(self, current, database=None):
         """
         returns array of `Passenger` objects (taken from `inside` attribute)
         that need to transfer to different car or reached final destination.
@@ -798,6 +903,8 @@ class Car:
             get ejected at edges or wrong vertices. If `namelup` is True,
             `current` must be a vertex name. Otherwise it must be a vertex
             index.
+        database: db.DatabaseProxy
+            database proxy with log() function for putting messages
 
         Returns
         ------
@@ -811,7 +918,7 @@ class Car:
                 'Expected {1}, got {2}.'.format(self.id, self.cur, current)
             )
         ejecting = np.array([], dtype='object')
-        nextvert = self.get_next()
+        # nextvert = self.get_next()
         for _ in range(len(self.inside)):
             p = self.inside.popleft()
             if p.get_next() in self.route:
@@ -819,16 +926,17 @@ class Car:
             else:
                 ejecting = np.append(ejecting, p)
                 # put message in log as passenger
-                log('ejected from car {0}'.format(self.id), 'pgr', p.id)
+                database.log(
+                    'ejected from car {0}'.format(self.id), 'pgr', p.id
+                )
         if ejecting.size != 0:
             # put message in log as car
-            log(
-                'ejecting passengers: {0}'.format([p.id for p in ejecting]),
-                'car', self.id
-            )
+            database.log('ejecting passengers: {0}'.format(
+                [p.id for p in ejecting]
+            ), 'car', self.id)
         return ejecting
 
-    def get_next(self, getstatus=False):
+    def get_next(self):
         """
         Attempts to return next destination in `route`. If cannot, returns
         current position.
@@ -840,10 +948,10 @@ class Car:
             nextvert = self.cur
         return nextvert
 
-    def pop_next(self):
+    def take_next(self):
         """
-        Attempts to take and return next destination in `route`. If car route
-        is circular, appends taken route vertex back.
+        Attempts to take (pop) and return next destination in `route`. If car
+        route is circular, appends taken route vertex back.
         """
         nextvert = self.route.popleft()
         if self.repeat:
@@ -862,7 +970,8 @@ class Car:
             nextvert = self.cur
         return nextvert
 
-    def chcur(self, newcur, newcurname=None, update_inside=True):
+    def chcur(self, newcur, newcurname=None, update_inside=True,
+              database=None):
         """
         Changes `cur` value to a `newcur`. Writes change in database
 
@@ -874,18 +983,27 @@ class Car:
             new current position name. Used when `namelup` is True and for
             logging purposes.
         update_inside: bool
-            if True, then updates current position of passeger objects inside.
-            Set to False when travelling to edges.
+            if True, then removes next vertex in `route` attribute of passenger
+            objects inside.  Set to False when travelling to edges.
+        db: db.DatabaseProxy
+            cursor to database where to log message
         """
         if self.namelup and newcurname:
             self.cur = newcurname
         else:
             self.cur = newcur
         for p in self.inside:
-            p.chcur(newcur, newcurname)
+            p.chcur(newcur, newcurname, database=database)
             if update_inside:
-                p.route.popleft()
-        log('i am at {0}: {1}'.format(newcur, newcurname), 'car', self.id)
+                p.take_next()
+        if database:
+            database.log(
+                'i am at {0}: {1}'.format(newcur, newcurname), 'car', self.id
+            )
+        else:
+            raise RuntimeWarning(
+                'cannot log message: database cursor is not provided'
+            )
 
 
 class Passenger:
@@ -973,6 +1091,18 @@ class Passenger:
             nextvert = self.cur
         return nextvert
 
+    def take_next(self):
+        """
+        Attempts to take (pop) and return next destination in `route`. If
+        cannot, returns current position
+        """
+        try:
+            nextvert = self.route.popleft()
+        except IndexError:
+            # nowhere to go - return current station
+            nextvert = self.cur
+        return nextvert
+
     def get_last(self):
         """
         Attempts to return last destination in `route`. If cannot, returns
@@ -985,7 +1115,7 @@ class Passenger:
             nextvert = self.cur
         return nextvert
 
-    def chcur(self, newcur, newcurname=None):
+    def chcur(self, newcur, newcurname=None, database=None):
         """
         Changes `cur` value to a `newcur`. Writes change in database
 
@@ -996,4 +1126,11 @@ class Passenger:
             self.cur = newcurname
         else:
             self.cur = newcur
-        log('i am at {0}: {1}'.format(newcur, newcurname), 'pgr', self.id)
+        if database:
+            database.log(
+                'i am at {0}: {1}'.format(newcur, newcurname), 'pgr', self.id
+            )
+        else:
+            raise RuntimeWarning(
+                'cannot log message: database cursor is not provided'
+            )

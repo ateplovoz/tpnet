@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# vim: ts=4 sw=4 tw=79
 """
 ======
 db.py
@@ -14,11 +15,11 @@ the Free Software Foundation, either version 3 of the License, or
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+along with this program.    If not, see <https://www.gnu.org/licenses/>.
 ======
 
 Description
@@ -59,18 +60,52 @@ class CurrentDb():
     Connect to current database and return cursor to this database
     """
     def __init__(self):
-        """Just get the current database filename"""
+        """This class provides access to the database"""
         self.current_db = current_db
 
     def __enter__(self):
         """Connect to database and return cursor"""
         self.con = sqlite3.connect(current_db)
-        return self.con.cursor()
+        return DatabaseProxy(self.con)
 
     def __exit__(self, type, value, traceback):
         """Close database connection when done"""
         self.con.commit()
         self.con.close()
+
+
+class DatabaseProxy():
+    """Class for convenient logging and other functions"""
+
+    def __init__(self, conn):
+        """
+        Initialize database proxy with connection and cursor pointing
+        to the current sqlite database in use
+        """
+        self.conn = conn
+        self.cursor = conn.cursor()
+
+    def log(self, msg, obj_type='sys', obj_id=0):
+        """
+        Put an entry into SQLite log
+
+        Arguments
+        ------
+        obj_type: str, max 3 chars
+            type of the object
+        obj_id: int
+            unique id number of object
+        msg: str
+            message to put into log
+        """
+
+        if len(obj_type) > 3:
+            raise ValueError('`obj_type` must be exactly 3 symbols')
+        self.cursor.execute(
+            'INSERT INTO log (object_type,object_id,message)'
+            'VALUES (?,?,?);',
+            (obj_type, obj_id, msg)
+        )
 
 
 def new_db():
@@ -92,7 +127,7 @@ def new_db():
     current_db = filename
     schema = open('schema.sql', 'r').read()
     with CurrentDb() as db:
-        db.execute(schema)
+        db.cursor.execute(schema)
 
 
 def clean_db():
@@ -105,26 +140,3 @@ def clean_db():
         i += 1
         os.remove(dbfile)
     print('{0} files deleted'.format(i))
-
-
-def log(msg, obj_type='sys', obj_id=0):
-    """
-    Put an entry into SQLite log
-
-    Arguments
-    ------
-    obj_type: str, max 3 chars
-        type of the object
-    obj_id: int
-        unique id number of object
-    msg: str
-        message to put into log
-    """
-
-    if len(obj_type) > 3:
-        raise ValueError('`obj_type` must be exactly 3 symbols')
-    with CurrentDb() as db:
-        db.execute(
-            'INSERT INTO log (object_type,object_id,message) VALUES (?,?,?);',
-            (obj_type, obj_id, msg)
-        )
